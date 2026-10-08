@@ -61,25 +61,38 @@ function FocusDemoScreen() {
   const targetRef = useRef<View>(null);
 
   useEffect(() => {
-    const target = targetRef.current;
-    if (!target) {
-      console.warn('[a11y-focus] Target ref was not mounted');
-      return;
-    }
+    let timer: ReturnType<typeof setTimeout> | undefined;
 
-    console.log(
-      `[a11y-focus] Requesting ${route.params.method} focus at ${Math.round(performance.now())}ms`,
-    );
+    const animationFrame = requestAnimationFrame(() => {
+      timer = setTimeout(() => {
+        const target = targetRef.current;
+        if (!target) {
+          console.warn('[a11y-focus] Target ref was not mounted');
+          return;
+        }
 
-    if (route.params.method === 'legacy-tag') {
-      const reactTag = findNodeHandle(target);
-      if (reactTag !== null) {
-        AccessibilityInfo.setAccessibilityFocus(reactTag);
+        console.log(
+          `[a11y-focus] Requesting ${route.params.method} focus at ${Math.round(performance.now())}ms`,
+        );
+
+        if (route.params.method === 'legacy-tag') {
+          const reactTag = findNodeHandle(target);
+          if (reactTag !== null) {
+            AccessibilityInfo.setAccessibilityFocus(reactTag);
+          }
+          return;
+        }
+
+        AccessibilityInfo.sendAccessibilityEvent(target, 'focus');
+      }, 50);
+    });
+
+    return () => {
+      cancelAnimationFrame(animationFrame);
+      if (timer !== undefined) {
+        clearTimeout(timer);
       }
-      return;
-    }
-
-    AccessibilityInfo.sendAccessibilityEvent(target, 'focus');
+    };
   }, [route.params.method]);
 
   return (

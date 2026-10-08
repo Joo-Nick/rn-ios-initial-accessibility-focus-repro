@@ -12,6 +12,8 @@ The destination screen keeps this accessibility traversal order:
 
 On mount, the app requests accessibility focus on **Requested body target**. The desired behavior is for the screen-reader cursor to start there while preserving the traversal order above.
 
+The request runs after one animation frame and a 50 ms iOS accessibility-tree stabilization window. Sending it directly from the mount effect can be dropped before the native screen becomes visible, which is a separate failure mode from the delayed focus demonstrated here.
+
 ## Environment
 
 - Expo 54
