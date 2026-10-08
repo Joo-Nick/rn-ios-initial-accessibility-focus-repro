@@ -1,77 +1,59 @@
-# React Native iOS initial accessibility focus reproduction
+# iOS VoiceOver initial focus after native-stack navigation
 
-This minimal Expo/React Native app demonstrates a screen-reader focus difference between iOS VoiceOver and Android TalkBack during native-stack navigation.
+Minimal React Native reproduction for delayed or overridden programmatic
+VoiceOver focus after pushing a page with React Navigation's native stack.
 
-The destination screen keeps this accessibility traversal order:
-
-1. Back
-2. Title
-3. Home
-4. Requested body target
-5. Next body action
-
-On mount, the app requests accessibility focus on **Requested body target**. The desired behavior is for the screen-reader cursor to start there while preserving the traversal order above.
-
-The request runs after one animation frame and a 50 ms iOS accessibility-tree stabilization window. Sending it directly from the mount effect can be dropped before the native screen becomes visible, which is a separate failure mode from the delayed focus demonstrated here.
+The bug under test is **page navigation**, not modal presentation. The app also
+contains a React Native core `Modal` control to show that the same
+`AccessibilityInfo.sendAccessibilityEvent(target, 'focus')` call can focus the
+same body content promptly after `Modal.onShow`.
 
 ## Environment
 
-- Expo 54
-- React Native 0.81.5
-- React 19.1.0
-- React Navigation 7.3.18
-- React Navigation native stack 7.18.10
-- React Native Screens 4.16.0
-- New Architecture enabled
-- Stack animation disabled
+- React Native 0.87.1
+- React Navigation native stack 7.20.0
+- react-native-screens 4.28.0
+- Hermes
+- Bare React Native workflow, debug build
+- Physical iPhone XS, iOS 18.7.10
 
-## Run on an iPhone
+## Run
 
-VoiceOver behavior should be tested on a physical device.
+Use Node.js 22.13 or newer.
 
-```bash
+```sh
 npm install
-npm run ios
+cd ios && pod install && cd ..
+npm start -- --reset-cache
 ```
 
-Enable VoiceOver before reproducing:
+In another terminal:
 
-1. Open iOS Settings.
-2. Select Accessibility → VoiceOver.
-3. Enable VoiceOver.
-4. Launch the app.
+```sh
+npm run ios -- --device
+```
 
 ## Reproduce
 
-1. On the home screen, focus one of the demo buttons.
-2. Activate **Open with legacy tag focus**.
-3. Listen for which element VoiceOver focuses first and how long it takes to reach **Requested body target**.
-4. Go back.
-5. Repeat with **Open with renderer ref focus**.
+1. Enable VoiceOver on a physical iPhone.
+2. Launch the app.
+3. Activate **Open native-stack page**.
+4. After the native-stack `transitionEnd` event reports that opening has
+   completed, the app waits for one animation frame plus 50 ms and calls
+   `AccessibilityInfo.sendAccessibilityEvent(target, 'focus')` for **Requested
+   body target**.
+5. Go back and repeat several times.
 
-The two modes use:
+Actual behavior: VoiceOver commonly focuses another element first (often the
+first header item), then moves to the requested body target noticeably later;
+occasionally the request is not honored. The timing varies between runs.
 
-- `findNodeHandle` + `AccessibilityInfo.setAccessibilityFocus`
-- `AccessibilityInfo.sendAccessibilityEvent(hostInstance, 'focus')`
+Expected behavior: once the native-stack opening transition has completed, the
+requested body target should receive VoiceOver focus promptly and
+deterministically.
 
-The Metro console records when the app sends the focus request:
+For comparison, activate **Open core Modal control**. It makes the same focus
+request after `Modal.onShow` and usually focuses the body target immediately.
 
-```text
-[a11y-focus] Requesting renderer-ref focus at 1000ms
-```
-
-The relevant observation is whether VoiceOver first focuses a different element and only later moves to the requested target. React Native 0.81 does not expose a public `onAccessibilityFocus` callback for measuring the receiving side, so the VoiceOver announcement is the source of truth in this reproduction.
-
-## Expected behavior
-
-- The requested body target receives the initial VoiceOver focus.
-- No intermediate element receives focus.
-- Traversal order remains Back → Title → Home → Requested body target → Next body action.
-
-## Why accessibility order is not a substitute
-
-Moving the body target to the beginning of `experimental_accessibilityOrder` changes the full traversal order. This reproduction specifically needs to preserve the existing order while choosing a different starting point.
-
-## Scope
-
-This project contains no application-specific code, assets, APIs, or business logic. It exists only to reproduce and measure initial accessibility focus behavior.
+Each request is logged with an `[a11y-focus]` prefix. The log records when the
+request is sent; VoiceOver's actual focus arrival is observed on the device.

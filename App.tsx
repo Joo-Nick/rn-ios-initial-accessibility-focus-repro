@@ -1,122 +1,150 @@
-import {
-  NavigationContainer,
-  type RouteProp,
-  useNavigation,
-  useRoute,
-} from '@react-navigation/native';
+import {NavigationContainer, useNavigation} from '@react-navigation/native';
 import {
   createNativeStackNavigator,
   type NativeStackNavigationProp,
 } from '@react-navigation/native-stack';
-import {StatusBar} from 'expo-status-bar';
-import {useCallback, useEffect, useRef} from 'react';
-import {SafeAreaProvider, SafeAreaView} from 'react-native-safe-area-context';
+import React, {useEffect, useRef, useState} from 'react';
 import {
   AccessibilityInfo,
-  findNodeHandle,
+  Modal,
   Pressable,
+  SafeAreaView,
+  StatusBar,
   StyleSheet,
   Text,
   View,
 } from 'react-native';
 
-type FocusMethod = 'legacy-tag' | 'renderer-ref';
-
 type RootStackParamList = {
   Home: undefined;
-  FocusDemo: {method: FocusMethod};
+  FocusDemo: undefined;
 };
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
+let nextTrialId = 1;
+
+function requestBodyFocus(
+  target: React.ComponentRef<typeof View> | null,
+  source: 'core-modal' | 'native-stack',
+) {
+  const trialId = nextTrialId++;
+
+  requestAnimationFrame(() => {
+    setTimeout(() => {
+      if (target === null) {
+        console.log(`[a11y-focus] trial=${trialId} source=${source} target-not-mounted`);
+        return;
+      }
+
+      console.log(
+        `[a11y-focus] trial=${trialId} source=${source} requestedAt=${Date.now()}ms`,
+      );
+      AccessibilityInfo.sendAccessibilityEvent(target, 'focus');
+    }, 50);
+  });
+}
+
+function App() {
+  return (
+    <NavigationContainer>
+      <StatusBar barStyle="dark-content" />
+      <Stack.Navigator screenOptions={{headerShown: false}}>
+        <Stack.Screen component={HomeScreen} name="Home" />
+        <Stack.Screen component={FocusDemoScreen} name="FocusDemo" />
+      </Stack.Navigator>
+    </NavigationContainer>
+  );
+}
 
 function HomeScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList, 'Home'>>();
-
-  const openDemo = useCallback(
-    (method: FocusMethod) => {
-      navigation.navigate('FocusDemo', {method});
-    },
-    [navigation],
-  );
+  const [isModalVisible, setIsModalVisible] = useState(false);
+  const modalTargetRef = useRef<React.ComponentRef<typeof View>>(null);
 
   return (
-    <Screen>
-      <Text accessibilityRole="header" style={styles.screenTitle}>
-        Initial accessibility focus repro
-      </Text>
-      <Text style={styles.description}>
-        Enable VoiceOver before opening the demo. Compare the deprecated tag API with the
-        renderer-aware ref API.
-      </Text>
-      <DemoButton label="Open with legacy tag focus" onPress={() => openDemo('legacy-tag')} />
-      <DemoButton label="Open with renderer ref focus" onPress={() => openDemo('renderer-ref')} />
-    </Screen>
+    <SafeAreaView style={styles.safeArea}>
+      <View style={styles.home}>
+        <Text accessibilityRole="header" style={styles.screenTitle}>
+          iOS VoiceOver initial focus repro
+        </Text>
+        <Text style={styles.description}>
+          Reproduce delayed initial VoiceOver focus after a native-stack page
+          transition. The Modal is only a control using the same focus API.
+        </Text>
+        <DemoButton
+          label="Open native-stack page"
+          onPress={() => navigation.navigate('FocusDemo')}
+        />
+        <DemoButton
+          label="Open core Modal control"
+          onPress={() => setIsModalVisible(true)}
+        />
+      </View>
+
+      <Modal
+        animationType="slide"
+        onRequestClose={() => setIsModalVisible(false)}
+        onShow={() => requestBodyFocus(modalTargetRef.current, 'core-modal')}
+        presentationStyle="fullScreen"
+        visible={isModalVisible}>
+        <FocusContent
+          closeLabel="Close"
+          onClose={() => setIsModalVisible(false)}
+          targetRef={modalTargetRef}
+        />
+      </Modal>
+    </SafeAreaView>
   );
 }
 
 function FocusDemoScreen() {
   const navigation =
     useNavigation<NativeStackNavigationProp<RootStackParamList, 'FocusDemo'>>();
-  const route = useRoute<RouteProp<RootStackParamList, 'FocusDemo'>>();
-  const targetRef = useRef<View>(null);
+  const targetRef = useRef<React.ComponentRef<typeof View>>(null);
 
   useEffect(() => {
-    let timer: ReturnType<typeof setTimeout> | undefined;
-
-    const animationFrame = requestAnimationFrame(() => {
-      timer = setTimeout(() => {
-        const target = targetRef.current;
-        if (!target) {
-          console.warn('[a11y-focus] Target ref was not mounted');
-          return;
-        }
-
-        console.log(
-          `[a11y-focus] Requesting ${route.params.method} focus at ${Math.round(performance.now())}ms`,
-        );
-
-        if (route.params.method === 'legacy-tag') {
-          const reactTag = findNodeHandle(target);
-          if (reactTag !== null) {
-            AccessibilityInfo.setAccessibilityFocus(reactTag);
-          }
-          return;
-        }
-
-        AccessibilityInfo.sendAccessibilityEvent(target, 'focus');
-      }, 50);
-    });
-
-    return () => {
-      cancelAnimationFrame(animationFrame);
-      if (timer !== undefined) {
-        clearTimeout(timer);
+    return navigation.addListener('transitionEnd', event => {
+      if (!event.data.closing) {
+        requestBodyFocus(targetRef.current, 'native-stack');
       }
-    };
-  }, [route.params.method]);
+    });
+  }, [navigation]);
 
   return (
-    <Screen>
+    <FocusContent
+      closeLabel="Back"
+      onClose={() => navigation.goBack()}
+      targetRef={targetRef}
+    />
+  );
+}
+
+type FocusContentProps = {
+  closeLabel: string;
+  onClose: () => void;
+  targetRef: React.RefObject<React.ComponentRef<typeof View> | null>;
+};
+
+function FocusContent({closeLabel, onClose, targetRef}: FocusContentProps) {
+  return (
+    <SafeAreaView style={styles.safeArea}>
       <View accessibilityLabel="Page header" style={styles.header}>
         <Pressable
-          accessibilityLabel="Back"
+          accessibilityLabel={closeLabel}
           accessibilityRole="button"
-          onPress={() => navigation.goBack()}
+          onPress={onClose}
           style={styles.headerButton}>
-          <Text style={styles.buttonText}>Back</Text>
+          <Text style={styles.buttonText}>{closeLabel}</Text>
         </Pressable>
 
-        <Text
-          accessible
-          accessibilityRole="header"
-          style={styles.headerTitle}>
+        <Text accessible accessibilityRole="header" style={styles.headerTitle}>
           Focus demo
         </Text>
 
         <Pressable
           accessibilityLabel="Home"
           accessibilityRole="button"
-          onPress={() => navigation.popToTop()}
+          onPress={onClose}
           style={styles.headerButton}>
           <Text style={styles.buttonText}>Home</Text>
         </Pressable>
@@ -131,7 +159,7 @@ function FocusDemoScreen() {
           style={styles.focusTarget}>
           <Text style={styles.targetTitle}>Requested body target</Text>
           <Text style={styles.targetDescription}>
-            VoiceOver should start here without first focusing Back, Title, or Home.
+            VoiceOver should move here promptly after the presentation finishes.
           </Text>
         </View>
 
@@ -139,87 +167,71 @@ function FocusDemoScreen() {
           accessibilityLabel="Next body action"
           accessibilityRole="button"
           onPress={() => undefined}
-          style={styles.actionButton}>
+          style={styles.bodyButton}>
           <Text style={styles.buttonText}>Next body action</Text>
         </Pressable>
       </View>
-    </Screen>
-  );
-}
-
-function Screen({children}: {children: React.ReactNode}) {
-  return (
-    <SafeAreaView style={styles.safeArea}>
-      <StatusBar style="dark" />
-      <View style={styles.container}>{children}</View>
     </SafeAreaView>
   );
 }
 
-function DemoButton({label, onPress}: {label: string; onPress: () => void}) {
+type DemoButtonProps = {
+  label: string;
+  onPress: () => void;
+};
+
+function DemoButton({label, onPress}: DemoButtonProps) {
   return (
     <Pressable
       accessibilityLabel={label}
       accessibilityRole="button"
       onPress={onPress}
-      style={styles.actionButton}>
+      style={styles.demoButton}>
       <Text style={styles.buttonText}>{label}</Text>
     </Pressable>
   );
 }
 
-export default function App() {
-  return (
-    <SafeAreaProvider>
-      <NavigationContainer>
-        <Stack.Navigator screenOptions={{animation: 'none', headerShown: false}}>
-          <Stack.Screen name="Home" component={HomeScreen} />
-          <Stack.Screen name="FocusDemo" component={FocusDemoScreen} />
-        </Stack.Navigator>
-      </NavigationContainer>
-    </SafeAreaProvider>
-  );
-}
-
 const styles = StyleSheet.create({
-  actionButton: {
-    alignItems: 'center',
-    backgroundColor: '#1d4ed8',
-    borderRadius: 12,
-    marginTop: 16,
-    paddingHorizontal: 18,
-    paddingVertical: 14,
-  },
   body: {
-    flex: 1,
-    paddingTop: 32,
+    gap: 20,
+    padding: 24,
+  },
+  bodyButton: {
+    alignSelf: 'flex-start',
+    backgroundColor: '#475569',
+    borderRadius: 10,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
   },
   buttonText: {
     color: '#ffffff',
     fontSize: 17,
     fontWeight: '600',
   },
-  container: {
-    flex: 1,
-    padding: 20,
+  demoButton: {
+    backgroundColor: '#1d4ed8',
+    borderRadius: 10,
+    paddingHorizontal: 16,
+    paddingVertical: 16,
   },
   description: {
     color: '#334155',
     fontSize: 17,
     lineHeight: 25,
-    marginTop: 16,
   },
   focusTarget: {
     backgroundColor: '#dcfce7',
     borderColor: '#16a34a',
     borderRadius: 12,
-    borderWidth: 2,
+    borderWidth: 3,
     padding: 20,
   },
   header: {
     alignItems: 'center',
     flexDirection: 'row',
     gap: 12,
+    padding: 16,
   },
   headerButton: {
     backgroundColor: '#1d4ed8',
@@ -233,6 +245,10 @@ const styles = StyleSheet.create({
     fontSize: 22,
     fontWeight: '700',
     textAlign: 'center',
+  },
+  home: {
+    gap: 20,
+    padding: 24,
   },
   safeArea: {
     backgroundColor: '#f8fafc',
@@ -255,3 +271,5 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
 });
+
+export default App;
