@@ -1,0 +1,14 @@
+{
+  "expo": {
+    "name": "iOS Initial Accessibility Focus Repro",
+    "slug": "rn-ios-initial-accessibility-focus-repro",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "newArchEnabled": true,
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.joonick.rniosinitialfocusrepro"
+    }
+  }
+}
+
